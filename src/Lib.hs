@@ -7,6 +7,7 @@ module Lib
     ) where
 
 import Control.Arrow ((&&&), arr, returnA)
+import Control.Applicative (liftA2)
 import Control.Lens ((^?), (^.), maximumByOf, Prism', prism')
 import Data.Aeson.Lens (_Array, _Double, key, _String)
 import Data.Function (on)
@@ -28,9 +29,7 @@ _LocalTime = prism' show (readMaybe . replace 'T' ' ')
 fetchLatestWeight :: IO (Maybe (Double, LocalTime))
 fetchLatestWeight = do
     res <- get "https://api.ryota-ka.me/weights"
-    pure $ case (arr extractValue &&& arr extractDate) . returnA <$> latest (res ^. responseBody . _Array) of
-           Just (weight, date) -> (,) <$> weight <*> date
-           _ -> Nothing
+    pure . maybe Nothing (uncurry (liftA2 (,))) $ (arr extractValue &&& arr extractDate) . returnA <$> latest (res ^. responseBody . _Array)
     where
         extractDate = (^? key "date" . _String . unpacked . _LocalTime)
         extractValue = (^? key "value" . _Double)

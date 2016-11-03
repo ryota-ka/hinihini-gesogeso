@@ -2,7 +2,9 @@
 
 module Lib
     ( buildText
+    , fetchLatestFat
     , fetchLatestWeight
+    , getHeight
     , tweet
     ) where
 
@@ -20,11 +22,11 @@ import Web.Twitter.Conduit (call, Credential(..), def, newManager, OAuth(..), oa
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.Text as T
 
-replace :: Eq a => a -> a -> [a] -> [a]
-replace from to = map (\x -> if x == from then to else x)
-
 _LocalTime :: Prism' String LocalTime
 _LocalTime = prism' show (readMaybe . replace 'T' ' ')
+    where
+      replace :: Eq a => a -> a -> [a] -> [a]
+      replace from to = map (\x -> if x == from then to else x)
 
 fetchLatestWeight :: IO (Maybe (Double, LocalTime))
 fetchLatestWeight = do
@@ -35,13 +37,25 @@ fetchLatestWeight = do
         extractValue = (^? key "value" . _Double)
         latest = maximumByOf traverse (compare `on` (^? key "date" . _String))
 
-buildText :: Double -> LocalTime -> T.Text
-buildText weight date = T.pack $ mconcat [
-    "最終更新日は"
-  , replace '-' '/' . showGregorian . localDay $ date
-  , "の"
-  , show (weight / 1000)
-  , "kgです。がんばって太りましょう #ひにひにげそげそ #bot"
+fetchLatestFat :: IO (Maybe (Double, LocalTime))
+fetchLatestFat = do
+    res <- get "https://api.ryota-ka.me/fats"
+    pure . maybe Nothing (uncurry (liftA2 (,))) $ (arr extractValue &&& arr extractDate) . returnA <$> latest (res ^. responseBody . _Array)
+    where
+        extractDate = (^? key "date" . _String . unpacked . _LocalTime)
+        extractValue = (^? key "value" . _Double)
+        latest = maximumByOf traverse (compare `on` (^? key "date" . _String))
+
+bmi :: Double -> Int -> Double
+bmi weight height = weight * 1000 / fromIntegral (height ^ 2)
+
+buildText :: Double -> Double -> Int -> LocalTime -> T.Text
+buildText weight fat height date = T.pack $ mconcat [
+    "最終更新日 : " ++ showGregorian (localDay date) ++ "\n"
+  , "体重 : " ++ show (weight / 1000) ++ "kg\n"
+  , "体脂肪率 : " ++ show (fat / 10000) ++ "%\n"
+  , "BMI : " ++ take 5 (show (bmi weight height)) ++ "\n"
+  , "がんばって太りましょう #ひにひにげそげそ"
   ]
 
 getTWInfo :: IO TWInfo
@@ -61,6 +75,9 @@ getTWInfo = do
             , ("oauth_token_secret", accessTokenSecret)
             ]
     pure $ setCredential oauth cred def
+
+getHeight :: IO Int
+getHeight = read <$> getEnv "HINIHINI_GESOGESO_HEIGHT"
 
 tweet :: T.Text -> IO ()
 tweet text = do
